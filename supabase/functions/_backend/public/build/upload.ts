@@ -6,6 +6,18 @@ import { checkPermission } from '../../utils/rbac.ts'
 import { supabaseApikey } from '../../utils/supabase.ts'
 import { getEnv } from '../../utils/utils.ts'
 
+const CALLER_CREDENTIAL_HEADERS = [
+  'authorization',
+  'capgkey',
+  'capgo_api',
+  'apikey',
+  'apisecret',
+  'x-api-key',
+  'x-limited-key-id',
+  'cookie',
+  'proxy-authorization',
+]
+
 /**
  * TUS proxy for builder uploads
  * This proxies TUS protocol requests (POST, HEAD, PATCH, OPTIONS) to the builder,
@@ -194,6 +206,9 @@ export async function tusProxy(
 
   // Forward the request to builder with API key
   const headers = new Headers(c.req.raw.headers)
+  for (const header of CALLER_CREDENTIAL_HEADERS) {
+    headers.delete(header)
+  }
   headers.set('x-api-key', builderApiKey)
 
   // For POST requests, rewrite Upload-Metadata to use the correct artifact key

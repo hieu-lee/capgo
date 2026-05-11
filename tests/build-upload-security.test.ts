@@ -42,11 +42,12 @@ describe('build upload proxy security', () => {
   })
   let queryBuilder: ReturnType<typeof createQueryBuilder>
 
-  const fakeContext = (url: string, method = 'POST') => {
+  const fakeContext = (url: string, method = 'POST', headers: HeadersInit = {}) => {
     const request = new Request(url, {
       method,
       headers: {
         'Tus-Resumable': '1.0.0',
+        ...headers,
       },
     })
 
@@ -146,6 +147,56 @@ describe('build upload proxy security', () => {
         'https://builder.capgo.app/upload/artifact.zip',
         expect.anything(),
       )
+    }
+    finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it('strips caller credentials before forwarding uploads to builder', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, {
+      status: 204,
+      headers: {
+        'Upload-Offset': '10',
+        'Tus-Resumable': '1.0.0',
+      },
+    }))
+
+    try {
+      const context = fakeContext(`http://localhost/build/upload/${jobId}/artifact.zip`, 'PATCH', {
+        'Authorization': 'Bearer caller-jwt',
+        'capgkey': 'caller-capgkey',
+        'capgo_api': 'caller-capgo-api',
+        'apikey': 'caller-apikey',
+        'apisecret': 'caller-apisecret',
+        'x-api-key': 'caller-x-api-key',
+        'x-limited-key-id': '123',
+        'Cookie': 'session=caller-session',
+        'Proxy-Authorization': 'Basic caller-proxy',
+        'Upload-Offset': '10',
+      })
+
+      const response = await tusProxy(context as any, jobId, { user_id: 'user-test', key: 'api-test' } as any)
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      const forwardedHeaders = new Headers(init.headers)
+
+      expect(response.status).toBe(204)
+      expect(forwardedHeaders.get('x-api-key')).toBe('builder-secret')
+      expect(forwardedHeaders.get('tus-resumable')).toBe('1.0.0')
+      expect(forwardedHeaders.get('upload-offset')).toBe('10')
+
+      for (const header of [
+        'authorization',
+        'capgkey',
+        'capgo_api',
+        'apikey',
+        'apisecret',
+        'x-limited-key-id',
+        'cookie',
+        'proxy-authorization',
+      ]) {
+        expect(forwardedHeaders.has(header)).toBe(false)
+      }
     }
     finally {
       fetchMock.mockRestore()
